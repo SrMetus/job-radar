@@ -1,6 +1,18 @@
 # Job Radar
 
-A small FastAPI portfolio project with a health check endpoint.
+A small FastAPI portfolio project for storing and browsing job offers.
+
+## Endpoints
+
+- `GET /health`: API health check.
+- `POST /jobs`: create a job and return it with status 201.
+- `GET /jobs`: list all jobs by newest creation time first, then descending ID.
+- `GET /jobs/{job_id}`: retrieve a job, or return 404 if it does not exist.
+
+Apply migrations before using the jobs endpoints. Use <http://localhost:8000/docs>
+to submit a job with `title`, `company`, `location`, `seniority`, `description`,
+and `url` strings, plus an optional `remote` boolean (defaults to false).
+Responses include the generated `id` and `created_at` timestamp.
 
 ## Docker setup
 
@@ -127,8 +139,10 @@ PostgreSQL server, so they do not validate PostgreSQL runtime behavior.
 `app/main.py` contains the application and health endpoint. Database configuration
 lives in `app/core/config.py`, Base and session setup in `app/db/`, and the typed
 Job model in `app/models/`. Alembic migrations live in `alembic/versions/`.
-The `schemas`, `api`, and `services` packages remain placeholders. Tests live in
-`tests/`.
+Request/response schemas live in `app/schemas/`, and the jobs router and session
+dependency live in `app/api/`. The `services` package remains a placeholder.
+Tests live in `tests/`; API tests override the session dependency with isolated
+SQLite databases.
 
 FastAPI's standard dependencies provide the development server and CLI. pytest
 runs the tests, and HTTPX supports FastAPI's test client.

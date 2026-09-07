@@ -1,5 +1,7 @@
-from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import select
+from typing import Annotated
+
+from fastapi import APIRouter, HTTPException, Query, status
+from sqlalchemy import func, or_, select
 
 from app.api.dependencies import SessionDep
 from app.models import Job
@@ -18,8 +20,29 @@ def create_job(job_in: JobCreate, session: SessionDep) -> Job:
 
 
 @router.get("", response_model=list[JobRead])
-def list_jobs(session: SessionDep) -> list[Job]:
+def list_jobs(
+    session: SessionDep,
+    remote: bool | None = None,
+    seniority: str | None = None,
+    q: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[Job]:
     statement = select(Job).order_by(Job.created_at.desc(), Job.id.desc())
+    if remote is not None:
+        statement = statement.where(Job.remote == remote)
+    if seniority is not None:
+        statement = statement.where(func.lower(Job.seniority) == func.lower(seniority))
+    if q is not None:
+        statement = statement.where(
+            or_(
+                Job.title.icontains(q, autoescape=True),
+                Job.company.icontains(q, autoescape=True),
+                Job.location.icontains(q, autoescape=True),
+                Job.description.icontains(q, autoescape=True),
+            )
+        )
+    statement = statement.limit(limit).offset(offset)
     return list(session.scalars(statement).all())
 
 

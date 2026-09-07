@@ -117,3 +117,130 @@ def test_create_job_missing_fields_does_not_persist(
     assert response.status_code == 422
     with Session(engine) as session:
         assert session.scalars(select(Job)).all() == []
+
+
+@pytest.fixture
+def filter_jobs(engine: Engine, job_data: dict[str, str]) -> list[int]:
+    with Session(engine) as session:
+        jobs = [
+            Job(**{**job_data, "title": "Python Developer", "remote": True,
+                   "seniority": "Junior"}),
+            Job(**{**job_data, "company": "PYTHON Labs", "remote": False,
+                   "seniority": "JUNIOR", "description": "Build APIs"}),
+            Job(**{**job_data, "location": "Python Valley", "remote": True,
+                   "seniority": "senior", "description": "Build APIs"}),
+            Job(**{**job_data, "remote": True, "seniority": "junior developer"}),
+        ]
+        for day, job in enumerate(jobs, start=1):
+            job.created_at = datetime(2026, 1, day, tzinfo=timezone.utc)
+        session.add_all(jobs)
+        session.commit()
+        return [job.id for job in jobs]
+
+
+@pytest.mark.parametrize("remote, indices", [("true", [3, 2, 0]), ("false", [1])])
+def test_filter_remote(
+    client: TestClient, filter_jobs: list[int], remote: str, indices: list[int]
+) -> None:
+    response = client.get("/jobs", params={"remote": remote})
+    assert response.status_code == 200
+    assert [job["id"] for job in response.json()] == [filter_jobs[i] for i in indices]
+
+
+def test_filter_seniority_exact_case_insensitive(
+    client: TestClient, filter_jobs: list[int]
+) -> None:
+    response = client.get("/jobs", params={"seniority": "jUnIoR"})
+    assert response.status_code == 200
+    assert [job["id"] for job in response.json()] == [filter_jobs[1], filter_jobs[0]]
+
+
+@pytest.mark.parametrize("field", ["title", "company", "location", "description"])
+def test_text_search_each_field(
+    client: TestClient, engine: Engine, job_data: dict[str, str], field: str
+) -> None:
+    with Session(engine) as session:
+        matching = Job(**{**job_data, field: "A NeEdLe inside text"})
+        session.add_all([matching, Job(**job_data)])
+        session.commit()
+        expected_id = matching.id
+    response = client.get("/jobs", params={"q": "needle"})
+    assert response.status_code == 200
+    assert [job["id"] for job in response.json()] == [expected_id]
+
+
+@pytest.mark.parametrize("query", ["%", "_", "/"])
+def test_text_search_treats_wildcards_literally(
+    client: TestClient, engine: Engine, job_data: dict[str, str], query: str
+) -> None:
+    with Session(engine) as session:
+        matching = Job(**{**job_data, "title": f"Literal {query} character"})
+        session.add_all([matching, Job(**job_data)])
+        session.commit()
+        expected_id = matching.id
+    response = client.get("/jobs", params={"q": query})
+    assert response.status_code == 200
+    assert [job["id"] for job in response.json()] == [expected_id]
+
+
+def test_combined_filters(client: TestClient, filter_jobs: list[int]) -> None:
+    response = client.get(
+        "/jobs", params={"remote": "true", "seniority": "JUNIOR", "q": "pYtHoN"}
+    )
+    assert response.status_code == 200
+    assert [job["id"] for job in response.json()] == [filter_jobs[0]]
+
+
+def test_pagination_applies_after_filters(
+    client: TestClient, filter_jobs: list[int]
+) -> None:
+    response = client.get(
+        "/jobs", params={"remote": "true", "limit": 1, "offset": 1}
+    )
+    assert response.status_code == 200
+    assert [job["id"] for job in response.json()] == [filter_jobs[2]]
+
+
+@pytest.mark.parametrize(
+    "params, indices",
+    [({"limit": 2}, [3, 2]), ({"offset": 2}, [1, 0]),
+     ({"limit": 100}, [3, 2, 1, 0]), ({"offset": 10}, [])],
+)
+def test_pagination(
+    client: TestClient, filter_jobs: list[int], params: dict[str, int], indices: list[int]
+) -> None:
+    response = client.get("/jobs", params=params)
+    assert response.status_code == 200
+    assert [job["id"] for job in response.json()] == [filter_jobs[i] for i in indices]
+
+
+def test_default_limit_is_twenty(
+    client: TestClient, engine: Engine, job_data: dict[str, str]
+) -> None:
+    with Session(engine) as session:
+        jobs = [
+            Job(**job_data, created_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+            for _ in range(21)
+        ]
+        session.add_all(jobs)
+        session.commit()
+        expected_ids = [job.id for job in reversed(jobs)][0:20]
+    response = client.get("/jobs")
+    assert response.status_code == 200
+    assert [job["id"] for job in response.json()] == expected_ids
+
+
+@pytest.mark.parametrize(
+    "params",
+    [{"limit": "0"}, {"limit": "-1"}, {"limit": "101"}, {"limit": "abc"},
+     {"limit": "1.5"}, {"offset": "-1"}, {"offset": "abc"}, {"offset": "1.5"}],
+)
+def test_invalid_pagination(client: TestClient, params: dict[str, str]) -> None:
+    response = client.get("/jobs", params=params)
+    assert response.status_code == 422
+
+
+def test_filters_without_matches(client: TestClient, filter_jobs: list[int]) -> None:
+    response = client.get("/jobs", params={"q": "no matching text"})
+    assert response.status_code == 200
+    assert response.json() == []

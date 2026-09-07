@@ -6,13 +6,23 @@ A small FastAPI portfolio project for storing and browsing job offers.
 
 - `GET /health`: API health check.
 - `POST /jobs`: create a job and return it with status 201.
-- `GET /jobs`: list all jobs by newest creation time first, then descending ID.
+- `GET /jobs`: list jobs by newest creation time first, then descending ID.
 - `GET /jobs/{job_id}`: retrieve a job, or return 404 if it does not exist.
 
 Apply migrations before using the jobs endpoints. Use <http://localhost:8000/docs>
 to submit a job with `title`, `company`, `location`, `seniority`, `description`,
 and `url` strings, plus an optional `remote` boolean (defaults to false).
 Responses include the generated `id` and `created_at` timestamp.
+
+`GET /jobs` accepts optional `remote=true|false`, `seniority` (case-insensitive
+exact match), and `q` (case-insensitive substring search across title, company,
+location, and description). Filters combine with AND; `q` matches any of its
+four fields and treats `%` and `_` as literal characters. An empty `q` matches
+all jobs. Pagination applies after filtering: `limit` defaults to 20 (allowed
+range 1–100), and `offset` defaults to 0 (must be nonnegative). Invalid pagination
+values return 422. Responses remain JSON lists.
+
+Example: <http://localhost:8000/jobs?remote=true&seniority=junior&q=python&limit=10&offset=0>.
 
 ## Docker setup
 

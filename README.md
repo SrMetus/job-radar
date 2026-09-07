@@ -2,6 +2,64 @@
 
 A small FastAPI portfolio project with a health check endpoint.
 
+## Docker setup
+
+Install Docker with Compose (Docker Desktop with Linux containers on Windows).
+From the repository root, copy `.env.example` to `.env`:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+On macOS/Linux, use `cp .env.example .env`. Choose a local `POSTGRES_PASSWORD`
+and set the same credentials in `DATABASE_URL`, URL-encoding special characters
+in the URL. Keep the URL hostname as `db`, the Compose PostgreSQL service name.
+`POSTGRES_DB` and `POSTGRES_USER` must also match the URL. For passwords containing
+`$`, single-quote the value in `.env` to prevent Compose interpolation.
+The `.env` file is ignored by Git and excluded from the image build.
+
+Build and start the stack:
+
+```bash
+docker compose up --build
+```
+
+The app waits for PostgreSQL to be healthy and serves the API on
+<http://localhost:8000/health>, returning `{"status": "ok"}`. API documentation is
+at <http://localhost:8000/docs>. Add `-d` to run the stack in the background.
+Port 8000 must be available. PostgreSQL is accessible to the app on `db:5432`
+inside the Compose network.
+
+In another terminal, apply the existing Alembic migrations and check the schema:
+
+```bash
+docker compose exec app python -m alembic upgrade head
+docker compose exec app python -m alembic current
+docker compose exec app python -m alembic check
+```
+
+Migrations run explicitly, not on every server startup. `/health` checks the API;
+running Alembic verifies the app container can connect to PostgreSQL.
+
+Run the tests inside the Python 3.12 app container:
+
+```bash
+docker compose exec app python -m pytest -p no:cacheprovider
+```
+
+Inspect status/logs or stop the stack:
+
+```bash
+docker compose ps
+docker compose logs app db
+docker compose down
+```
+
+PostgreSQL data persists in the named `postgres_data` volume across container
+recreation and `docker compose down`. Database initialization variables only
+apply to an empty volume; editing `.env` does not change existing database
+credentials. Avoid `docker compose down -v` unless you intend to delete the data.
+
 ## Setup
 
 Use Python 3.12. From the repository root:
@@ -27,8 +85,9 @@ Visit <http://127.0.0.1:8000/health> for `{"status": "ok"}` or
 
 ## Database
 
-Create a local PostgreSQL database, then copy `.env.example` to `.env` and replace
-the connection placeholders with your own details. Use the
+For development without Docker, create a local PostgreSQL database, then copy
+`.env.example` to `.env` and replace the connection placeholders with your own
+details, changing the URL hostname from `db` to `localhost`. Use the
 `postgresql+psycopg://` URL scheme and URL-encode special characters in credentials.
 An existing `DATABASE_URL` environment variable takes precedence over `.env`.
 Database operations fail clearly if the URL is missing; `/health` remains independent

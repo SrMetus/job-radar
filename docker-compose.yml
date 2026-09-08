@@ -19,6 +19,7 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env with db as the hostname}
       EXTERNAL_JOB_SOURCE_URL: ${EXTERNAL_JOB_SOURCE_URL:-}
+      PYTHON_ORG_JOBS_URL: ${PYTHON_ORG_JOBS_URL:-}
     ports:
       - "8000:8000"
     depends_on:

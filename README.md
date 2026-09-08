@@ -7,6 +7,7 @@ A small FastAPI portfolio project for storing and browsing job offers.
 - `GET /health`: API health check.
 - `POST /jobs`: create a job with status 201; an existing URL returns 409.
 - `POST /jobs/import`: fetch the configured Remotive source and import new jobs.
+- `POST /jobs/import/python-org`: import the public Python.org HTML listing.
 - `GET /jobs`: list jobs by newest creation time first, then descending ID.
 - `GET /jobs/{job_id}`: retrieve a job, or return 404 if it does not exist.
 
@@ -80,6 +81,27 @@ apply. Remotive recommends at most four fetches per day and blocks excessive
 requests. Preserve its attribution and links and follow its redistribution terms.
 There is no automatic polling or retry loop. The example URL limits each fetch
 to 20 software jobs; it is not a complete historical job archive.
+
+## HTML imports
+
+The HTML importer uses `PYTHON_ORG_JOBS_URL=https://www.python.org/jobs/` from
+`.env`. Recreate the app after setting it, then call
+`curl -X POST http://localhost:8000/jobs/import/python-org`.
+It returns the same fetched/created/skipped summary as Remotive and shares its
+URL pre-check, unique constraint, and savepoint conflict recovery.
+
+Only the configured Python.org listing page is fetched, with no pagination or
+detail-page crawling. Descriptions are explicitly labeled listing summaries
+containing available categories and the source link, not full job descriptions.
+Remote is inferred from title/location wording; missing evidence means false,
+and seniority is `unknown`. These heuristics can miss hybrid or ambiguous roles.
+Malformed cards are skipped. Missing listing markup, HTTP errors, redirects,
+and non-HTML responses return 502; invalid configuration returns 503. No bypass
+of access restrictions is attempted. HTML selectors can break when the site
+changes; imported rows are not refreshed or deleted when postings disappear.
+Source: [Python.org Job Board](https://www.python.org/jobs/).
+BeautifulSoup is the only added direct dependency; it uses Python's built-in
+HTML parser. Automated tests use representative local HTML fixtures.
 
 ## Docker setup
 

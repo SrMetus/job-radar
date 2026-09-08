@@ -15,7 +15,10 @@ def test_create_job_persists(
 
     assert response.status_code == 201
     body = response.json()
-    assert body == {**job_data, "remote": True, "id": body["id"], "created_at": body["created_at"]}
+    assert body == {
+        **job_data, "remote": True, "id": body["id"],
+        "created_at": body["created_at"], "match_score": 49,
+    }
     assert isinstance(body["id"], int)
     assert datetime.fromisoformat(body["created_at"])
     with Session(engine) as session:
@@ -214,3 +217,28 @@ def test_filters_without_matches(client: TestClient, filter_jobs: list[int]) -> 
     response = client.get("/jobs", params={"q": "no matching text"})
     assert response.status_code == 200
     assert response.json() == []
+
+
+@pytest.mark.parametrize(
+    "title, description, remote, seniority, expected",
+    [
+        ("Backend Python Developer", "FastAPI PostgreSQL SQLAlchemy Docker AWS Git", True, "junior", 100),
+        ("Accountant", "Financial reporting", True, "senior", 15),
+    ],
+)
+def test_api_match_scores(
+    client: TestClient, job_data: dict[str, str], title: str, description: str,
+    remote: bool, seniority: str, expected: int,
+) -> None:
+    created = client.post("/jobs", json={
+        **job_data, "title": title, "description": description,
+        "remote": remote, "seniority": seniority,
+    })
+    assert created.status_code == 201
+    assert created.json()["match_score"] == expected
+    detail = client.get(f"/jobs/{created.json()['id']}")
+    assert detail.status_code == 200
+    assert detail.json()["match_score"] == expected
+    listing = client.get("/jobs")
+    assert listing.status_code == 200
+    assert listing.json()[0]["match_score"] == expected

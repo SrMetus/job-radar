@@ -15,6 +15,16 @@ to submit a job with `title`, `company`, `location`, `seniority`, `description`,
 and `url` strings, plus an optional `remote` boolean (defaults to false).
 Responses include the generated `id` and `created_at` timestamp.
 
+Job responses also include a computed `match_score` from 0 to 100, targeting a
+junior remote developer. Each distinct technology mentioned in title or
+description (Python, FastAPI, PostgreSQL, SQLAlchemy, Docker, AWS, Git) contributes
+an equal share of 60 points, rounded to the nearest integer. Remote adds 15;
+exact `junior` seniority adds 15; a backend, back-end, back end, Python, or software
+title adds 10 once. Matching is case-insensitive and uses word boundaries;
+repeated mentions do not add points. No aliases or semantic inference are used.
+Scores are computed during response serialization and are not stored. Existing
+listing filters and newest-first ordering are unchanged.
+
 `GET /jobs` accepts optional `remote=true|false`, `seniority` (case-insensitive
 exact match), and `q` (case-insensitive substring search across title, company,
 location, and description). Filters combine with AND; `q` matches any of its

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.models import Job
 from app.db.errors import is_job_url_conflict
 from app.schemas.job import JobCreate, JobImportSummary
+from app.services.job_normalization import html_to_text, infer_seniority
 
 
 class ExternalJobSourceError(Exception):
@@ -40,13 +41,16 @@ def normalize_remotive_job(record: object) -> JobCreate | None:
         TypeAdapter(HttpUrl).validate_python(fields["url"])
     except ValidationError:
         return None
+    description = html_to_text(fields["description"])
+    if not description:
+        return None
     return JobCreate(
         title=fields["title"],
         company=fields["company_name"],
         location=fields["candidate_required_location"],
         remote=True,
-        seniority="unknown",
-        description="Source: Remotive\n\n" + fields["description"],
+        seniority=infer_seniority(fields["title"]),
+        description=description,
         url=fields["url"],
     )
 

@@ -55,10 +55,11 @@ Provider HTTP errors, timeouts, invalid JSON, and invalid response structure ret
 
 The importer supports Remotive's `jobs` JSON array only. It maps `company_name`
 to company and `candidate_required_location` to location, sets remote to true and
-seniority to `unknown`, and trims required text. Missing/blank/non-string fields
-and invalid HTTP(S) job URLs are skipped. The description retains provider HTML
-with a `Source: Remotive` attribution prefix; treat it as untrusted content if
-displaying it in a future UI. `created_at` is the local import time, not the
+infers seniority from the title, and trims required text. Missing/blank/non-string
+fields and invalid HTTP(S) job URLs are skipped. Descriptions become plain text
+with paragraph/list line breaks; styles, scripts, images and source prefixes are
+not added to job content. Records with no readable description are skipped.
+`created_at` is the local import time, not the
 provider publication date. No existing jobs are updated or removed.
 
 Duplicate checks use exact, trimmed job URLs against the database and the current
@@ -91,10 +92,10 @@ It returns the same fetched/created/skipped summary as Remotive and shares its
 URL pre-check, unique constraint, and savepoint conflict recovery.
 
 Only the configured Python.org listing page is fetched, with no pagination or
-detail-page crawling. Descriptions are explicitly labeled listing summaries
-containing available categories and the source link, not full job descriptions.
+detail-page crawling. Descriptions contain only available job categories, not
+source names or URLs; they are empty when no categories are present.
 Remote is inferred from title/location wording; missing evidence means false,
-and seniority is `unknown`. These heuristics can miss hybrid or ambiguous roles.
+and seniority is inferred from the title. These heuristics can miss hybrid or ambiguous roles.
 Malformed cards are skipped. Missing listing markup, HTTP errors, redirects,
 and non-HTML responses return 502; invalid configuration returns 503. No bypass
 of access restrictions is attempted. HTML selectors can break when the site
@@ -240,3 +241,23 @@ Automated import tests mock HTTP responses and never call the public provider.
 SQLAlchemy 2.x provides the ORM, Psycopg 3 (binary distribution) connects to
 PostgreSQL without a local compiler, Alembic manages schema migrations, and
 python-dotenv loads local database configuration.
+
+## Imported content normalization
+
+Both importers infer seniority from whole-word title signals, case-insensitively.
+Precedence for multiple signals is principal, staff, lead (including tech/team
+lead), senior/sr, junior/jr/entry-level, then intern/internship. No signal means
+unknown; absence of a senior keyword never implies junior.
+Scoring ignores HTML markup, URLs and legacy Source: lines, while retaining real
+visible job text. Provider attribution belongs outside the description; source
+links remain in the job URL and this documentation.
+
+Existing development rows are not automatically rewritten. Reimports skip their
+URLs. To refresh them, back up the database, inspect the old imported rows by URL
+and legacy Source: description prefix, and record their IDs. In a database
+transaction, delete only those reviewed IDs, verify the affected count, and
+commit (or roll back if unexpected). Then rebuild the Docker app and invoke the
+corresponding import endpoint. Do not truncate the table or remove the volume
+unless all development data is intentionally disposable. Reimported rows receive
+new IDs and creation timestamps; postings no longer offered by the source will
+not return. No startup cleanup or data migration is included.

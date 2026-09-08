@@ -96,7 +96,7 @@ def test_successful_import_and_normalization(
         assert job.location == "Worldwide"
         assert job.remote is True
         assert job.seniority == "unknown"
-        assert job.description == "Source: Remotive\n\n<p>Build APIs.</p>"
+        assert job.description == "Build APIs."
         assert job.url == str(external_job["url"]).strip()
         assert job.id is not None and job.created_at is not None
 

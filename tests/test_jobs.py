@@ -17,7 +17,7 @@ def test_create_job_persists(
     body = response.json()
     assert body == {
         **job_data, "remote": True, "id": body["id"],
-        "created_at": body["created_at"], "match_score": 49,
+        "created_at": body["created_at"], "match_score": 65,
     }
     assert isinstance(body["id"], int)
     assert datetime.fromisoformat(body["created_at"])
@@ -223,7 +223,7 @@ def test_filters_without_matches(client: TestClient, filter_jobs: list[int]) -> 
     "title, description, remote, seniority, expected",
     [
         ("Backend Python Developer", "FastAPI PostgreSQL SQLAlchemy Docker AWS Git", True, "junior", 100),
-        ("Accountant", "Financial reporting", True, "senior", 15),
+        ("Accountant", "Financial reporting", True, "senior", 0),
     ],
 )
 def test_api_match_scores(

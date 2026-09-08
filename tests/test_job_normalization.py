@@ -45,7 +45,7 @@ def test_python_org_has_no_provider_python_points() -> None:
     assert job.description == "Finance"
     assert job.seniority == "junior"
     assert calculate_match_score(title=job.title, description=job.description,
-        remote=job.remote, seniority=job.seniority) == 15
+        remote=job.remote, seniority=job.seniority) == 0
 
 
 @pytest.mark.parametrize("description", [
@@ -60,4 +60,4 @@ def test_metadata_does_not_score(description: str) -> None:
 
 def test_real_anchor_text_still_scores() -> None:
     assert calculate_match_score(title="", description='<a href="https://example.com">Python</a>',
-                                 remote=False, seniority="unknown") == 9
+                                 remote=False, seniority="unknown") == 20

@@ -18,3 +18,9 @@ class JobRead(JobCreate):
 
     id: int
     created_at: datetime
+
+
+class JobImportSummary(BaseModel):
+    fetched: int
+    created: int
+    skipped: int

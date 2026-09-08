@@ -4,8 +4,10 @@ from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, or_, select
 
 from app.api.dependencies import SessionDep
+from app.core.config import get_external_job_source_url
 from app.models import Job
-from app.schemas.job import JobCreate, JobRead
+from app.schemas.job import JobCreate, JobImportSummary, JobRead
+from app.services.job_import import ExternalJobSourceError, import_jobs
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -44,6 +46,18 @@ def list_jobs(
         )
     statement = statement.limit(limit).offset(offset)
     return list(session.scalars(statement).all())
+
+
+@router.post("/import", response_model=JobImportSummary)
+def import_external_jobs(session: SessionDep) -> JobImportSummary:
+    try:
+        source_url = get_external_job_source_url()
+    except ValueError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from None
+    try:
+        return import_jobs(session, source_url)
+    except ExternalJobSourceError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from None
 
 
 @router.get("/{job_id}", response_model=JobRead)

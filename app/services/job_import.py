@@ -1,0 +1,70 @@
+"""Import the Remotive public JSON format without changing existing jobs."""
+
+import httpx
+from pydantic import HttpUrl, TypeAdapter, ValidationError
+from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
+
+from app.models import Job
+from app.schemas.job import JobCreate, JobImportSummary
+
+
+class ExternalJobSourceError(Exception):
+    """The provider could not supply a valid jobs response."""
+
+
+def fetch_jobs(source_url: str) -> list[object]:
+    try:
+        response = httpx.get(source_url, timeout=15.0, follow_redirects=True)
+        response.raise_for_status()
+        payload = response.json()
+    except (httpx.HTTPError, ValueError):
+        raise ExternalJobSourceError("External job source request failed.") from None
+    if not isinstance(payload, dict) or not isinstance(payload.get("jobs"), list):
+        raise ExternalJobSourceError("External job source returned an invalid jobs response.")
+    return payload["jobs"]
+
+
+def normalize_remotive_job(record: object) -> JobCreate | None:
+    if not isinstance(record, dict):
+        return None
+    fields = {}
+    for field in ("title", "company_name", "candidate_required_location", "description", "url"):
+        value = record.get(field)
+        if not isinstance(value, str) or not value.strip() or "\x00" in value:
+            return None
+        fields[field] = value.strip()
+    try:
+        TypeAdapter(HttpUrl).validate_python(fields["url"])
+    except ValidationError:
+        return None
+    return JobCreate(
+        title=fields["title"],
+        company=fields["company_name"],
+        location=fields["candidate_required_location"],
+        remote=True,
+        seniority="unknown",
+        description="Source: Remotive\n\n" + fields["description"],
+        url=fields["url"],
+    )
+
+
+def import_jobs(session: Session, source_url: str) -> JobImportSummary:
+    records = fetch_jobs(source_url)
+    normalized = [job for record in records if (job := normalize_remotive_job(record)) is not None]
+    urls = {job.url for job in normalized}
+    created = 0
+    try:
+        seen = set(session.scalars(select(Job.url).where(Job.url.in_(urls)))) if urls else set()
+        for job in normalized:
+            if job.url in seen:
+                continue
+            session.add(Job(**job.model_dump()))
+            seen.add(job.url)
+            created += 1
+        session.commit()
+    except SQLAlchemyError:
+        session.rollback()
+        raise
+    return JobImportSummary(fetched=len(records), created=created, skipped=len(records) - created)

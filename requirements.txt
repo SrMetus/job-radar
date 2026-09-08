@@ -1,5 +1,6 @@
 fastapi[standard]>=0.115,<1.0
 pytest>=8,<10
+# External JSON imports and FastAPI's test client.
 httpx>=0.27,<1.0
 SQLAlchemy>=2.0,<2.1
 psycopg[binary]>=3.2,<4

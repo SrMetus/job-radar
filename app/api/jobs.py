@@ -6,10 +6,11 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api.dependencies import SessionDep
 from app.db.errors import is_job_url_conflict
-from app.core.config import get_external_job_source_url
+from app.core.config import get_external_job_source_url, get_python_org_jobs_url
 from app.models import Job
 from app.schemas.job import JobCreate, JobImportSummary, JobRead
 from app.services.job_import import ExternalJobSourceError, import_jobs
+from app.services.python_org_import import import_python_org_jobs
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -64,6 +65,18 @@ def import_external_jobs(session: SessionDep) -> JobImportSummary:
         raise HTTPException(status_code=503, detail=str(error)) from None
     try:
         return import_jobs(session, source_url)
+    except ExternalJobSourceError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from None
+
+
+@router.post("/import/python-org", response_model=JobImportSummary)
+def import_html_jobs(session: SessionDep) -> JobImportSummary:
+    try:
+        source_url = get_python_org_jobs_url()
+    except ValueError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from None
+    try:
+        return import_python_org_jobs(session, source_url)
     except ExternalJobSourceError as error:
         raise HTTPException(status_code=502, detail=str(error)) from None
 

@@ -54,6 +54,12 @@ def normalize_remotive_job(record: object) -> JobCreate | None:
 def import_jobs(session: Session, source_url: str) -> JobImportSummary:
     records = fetch_jobs(source_url)
     normalized = [job for record in records if (job := normalize_remotive_job(record)) is not None]
+    return persist_new_jobs(session, normalized, fetched=len(records))
+
+
+def persist_new_jobs(
+    session: Session, normalized: list[JobCreate], *, fetched: int
+) -> JobImportSummary:
     urls = {job.url for job in normalized}
     created = 0
     try:
@@ -76,4 +82,4 @@ def import_jobs(session: Session, source_url: str) -> JobImportSummary:
     except SQLAlchemyError:
         session.rollback()
         raise
-    return JobImportSummary(fetched=len(records), created=created, skipped=len(records) - created)
+    return JobImportSummary(fetched=fetched, created=created, skipped=fetched - created)

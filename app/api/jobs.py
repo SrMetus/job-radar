@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, or_, select
@@ -11,6 +11,7 @@ from app.models import Job
 from app.schemas.job import JobCreate, JobImportSummary, JobRead
 from app.services.job_import import ExternalJobSourceError, import_jobs
 from app.services.python_org_import import import_python_org_jobs
+from app.services.job_scoring import calculate_match_score
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -38,8 +39,10 @@ def list_jobs(
     q: str | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
+    sort: Literal["created_at", "match_score"] = "created_at",
+    order: Literal["asc", "desc"] = "desc",
 ) -> list[Job]:
-    statement = select(Job).order_by(Job.created_at.desc(), Job.id.desc())
+    statement = select(Job)
     if remote is not None:
         statement = statement.where(Job.remote == remote)
     if seniority is not None:
@@ -53,6 +56,22 @@ def list_jobs(
                 Job.description.icontains(q, autoescape=True),
             )
         )
+    if sort == "match_score":
+        statement = statement.order_by(Job.created_at.desc(), Job.id.desc())
+        jobs = list(session.scalars(statement).all())
+        # Python's stable sort preserves newest-first/ID-desc ties in both directions.
+        jobs.sort(
+            key=lambda job: calculate_match_score(
+                title=job.title, description=job.description,
+                remote=job.remote, seniority=job.seniority,
+            ),
+            reverse=order == "desc",
+        )
+        return jobs[offset:offset + limit]
+    if order == "asc":
+        statement = statement.order_by(Job.created_at.asc(), Job.id.asc())
+    else:
+        statement = statement.order_by(Job.created_at.desc(), Job.id.desc())
     statement = statement.limit(limit).offset(offset)
     return list(session.scalars(statement).all())
 

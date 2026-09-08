@@ -242,3 +242,60 @@ def test_api_match_scores(
     listing = client.get("/jobs")
     assert listing.status_code == 200
     assert listing.json()[0]["match_score"] == expected
+
+
+@pytest.fixture
+def sortable_jobs(engine: Engine, job_data: dict[str, str]) -> list[int]:
+    with Session(engine) as session:
+        jobs = []
+        for index, (day, title, description, remote, seniority) in enumerate([
+            (1, "Python Backend Developer", "FastAPI PostgreSQL Docker", True, "junior"),
+            (4, "Python Developer", "", True, "unknown"),
+            (5, "Writer", "Writing", False, "unknown"),
+            (2, "Python Backend Developer", "FastAPI PostgreSQL Docker", True, "junior"),
+            (2, "Python Backend Developer", "FastAPI PostgreSQL Docker", True, "junior"),
+        ]):
+            jobs.append(Job(**{
+                **job_data, "title": title, "description": description,
+                "remote": remote, "seniority": seniority,
+                "url": f"https://example.com/sort/{index}",
+            }, created_at=datetime(2026, 1, day, tzinfo=timezone.utc)))
+        session.add_all(jobs)
+        session.commit()
+        return [job.id for job in jobs]
+
+
+@pytest.mark.parametrize("params, indices", [
+    ({"sort": "match_score"}, [4, 3, 0, 1, 2]),
+    ({"sort": "match_score", "order": "desc"}, [4, 3, 0, 1, 2]),
+    ({"sort": "match_score", "order": "asc"}, [2, 1, 4, 3, 0]),
+    ({"sort": "match_score", "limit": "1", "offset": "2"}, [0]),
+    ({"sort": "match_score", "order": "asc", "limit": "2", "offset": "1"}, [1, 4]),
+    ({"sort": "match_score", "offset": "10"}, []),
+    ({"sort": "match_score", "remote": "true", "seniority": "junior", "q": "python"}, [4, 3, 0]),
+    ({"sort": "match_score", "remote": "false"}, [2]),
+    ({"sort": "match_score", "q": "absent"}, []),
+    ({}, [2, 1, 4, 3, 0]),
+    ({"sort": "created_at"}, [2, 1, 4, 3, 0]),
+    ({"sort": "created_at", "order": "desc"}, [2, 1, 4, 3, 0]),
+    ({"sort": "created_at", "order": "asc"}, [0, 3, 4, 1, 2]),
+    ({"sort": "created_at", "order": "asc", "limit": "2", "offset": "1"}, [3, 4]),
+])
+def test_listing_sort_order(
+    client: TestClient, sortable_jobs: list[int], params: dict[str, str], indices: list[int]
+) -> None:
+    response = client.get("/jobs", params=params)
+    assert response.status_code == 200
+    rows = response.json()
+    assert [job["id"] for job in rows] == [sortable_jobs[index] for index in indices]
+    if params.get("sort") == "match_score":
+        scores = [job["match_score"] for job in rows]
+        assert scores == sorted(scores, reverse=params.get("order", "desc") == "desc")
+
+
+@pytest.mark.parametrize("params", [
+    {"sort": "title"}, {"order": "sideways"},
+    {"sort": "match_score", "order": "ASC"},
+])
+def test_invalid_sort_options(client: TestClient, params: dict[str, str]) -> None:
+    assert client.get("/jobs", params=params).status_code == 422

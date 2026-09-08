@@ -2,6 +2,8 @@
 
 import re
 
+from app.services.job_normalization import scoring_content
+
 PREFERRED_TECHNOLOGIES = (
     "python", "fastapi", "postgresql", "sqlalchemy", "docker", "aws", "git",
 )
@@ -11,7 +13,8 @@ TITLE_PATTERN = re.compile(r"\b(?:backend|back[\s-]+end|python|software)\b", re.
 def calculate_match_score(
     *, title: str, description: str, remote: bool, seniority: str
 ) -> int:
-    text = f"{title}\n{description}"
+    title = scoring_content(title)
+    text = f"{title}\n{scoring_content(description)}"
     matches = sum(
         bool(re.search(rf"\b{technology}\b", text, re.IGNORECASE))
         for technology in PREFERRED_TECHNOLOGIES

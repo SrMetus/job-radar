@@ -39,7 +39,8 @@ def test_parsing_and_normalization(html: str) -> None:
     assert jobs[0].remote is True
     assert jobs[0].seniority == "unknown"
     assert "Back end" in jobs[0].description
-    assert "Listing summary" in jobs[0].description
+    assert "Python.org" not in jobs[0].description
+    assert jobs[0].url not in jobs[0].description
     assert jobs[1].remote is False
 
 

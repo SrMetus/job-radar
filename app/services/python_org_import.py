@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.schemas.job import JobCreate, JobImportSummary
 from app.services.job_import import ExternalJobSourceError, persist_new_jobs
+from app.services.job_normalization import infer_seniority
 
 
 def normalize_python_org_job(card: Tag, source_url: str) -> JobCreate | None:
@@ -44,16 +45,14 @@ def normalize_python_org_job(card: Tag, source_url: str) -> JobCreate | None:
         node.get_text(" ", strip=True)
         for node in card.select(".listing-job-type, .listing-company-category")
     ]
-    description = "Source: Python.org Job Board. Listing summary; full description: " + url
-    if any(categories):
-        description += "\nCategories: " + "; ".join(value for value in categories if value)
+    description = "; ".join(value for value in categories if value)
     work_mode = f"{title} {location}"
     remote = bool(re.search(r"\bremote\b", work_mode, re.IGNORECASE))
     if re.search(r"\b(?:not|no|non)[\s-]+remote\b", work_mode, re.IGNORECASE):
         remote = False
     return JobCreate(
         title=title, company=company, location=location, url=url,
-        remote=remote, seniority="unknown", description=description,
+        remote=remote, seniority=infer_seniority(title), description=description,
     )
 
 

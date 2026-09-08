@@ -17,12 +17,16 @@ and `url` strings, plus an optional `remote` boolean (defaults to false).
 Responses include the generated `id` and `created_at` timestamp.
 
 Job responses also include a computed `match_score` from 0 to 100, targeting a
-junior remote developer. Each distinct technology mentioned in title or
-description (Python, FastAPI, PostgreSQL, SQLAlchemy, Docker, AWS, Git) contributes
-an equal share of 60 points, rounded to the nearest integer. Remote adds 15;
-exact `junior` seniority adds 15; a backend, back-end, back end, Python, or software
-title adds 10 once. Matching is case-insensitive and uses word boundaries;
-repeated mentions do not add points. No aliases or semantic inference are used.
+junior remote Python/backend developer. Technologies count once: Python 20,
+FastAPI 10, PostgreSQL 10, SQLAlchemy 5, Docker 5, AWS 3, Git 2 (55 total).
+A relevant development title adds 15, and remote adds 10. Normalized seniority
+adds 20 for junior or 10 for intern; unknown adds zero. Senior subtracts 15;
+lead, staff and principal subtract 25. The final score is clamped to 0–100.
+Eligibility requires a backend/back-end/back end, Python, software engineer,
+software developer, developer or DevOps title, or Python/FastAPI/SQLAlchemy in
+actual content. Otherwise the score is zero, including unrelated remote roles.
+Matching is case-insensitive with word boundaries. Source metadata, URLs and
+HTML noise remain excluded. This is keyword relevance, not semantic analysis.
 Scores are computed during response serialization and are not stored. Existing
 listing filters and newest-first ordering are unchanged.
 

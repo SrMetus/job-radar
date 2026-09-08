@@ -40,6 +40,23 @@ values return 422. Responses remain JSON lists.
 
 Example: <http://localhost:8000/jobs?remote=true&seniority=junior&q=python&limit=10&offset=0>.
 
+Sorting accepts `sort=created_at|match_score` and `order=asc|desc`; defaults are
+`created_at` and `desc`. Unsupported values return 422. Examples:
+
+```text
+GET /jobs?sort=match_score
+GET /jobs?sort=match_score&order=asc
+GET /jobs?remote=true&seniority=junior&sort=match_score
+```
+
+Date sorting uses SQL ordering and pagination (ID follows the date direction for
+ties). Score sorting filters in SQL, loads all matching candidates, computes
+scores in Python, sorts, then applies offset/limit. Equal scores always use
+creation time descending, then ID descending, even for ascending scores. This
+keeps pagination correct but uses memory and scoring time proportional to the
+filtered candidate count; it is an intentional MVP trade-off. Scores are neither
+stored nor duplicated in SQL.
+
 ## External imports
 
 Set `EXTERNAL_JOB_SOURCE_URL` in `.env` to the Remotive JSON endpoint shown in

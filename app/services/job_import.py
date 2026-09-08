@@ -3,10 +3,11 @@
 import httpx
 from pydantic import HttpUrl, TypeAdapter, ValidationError
 from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.models import Job
+from app.db.errors import is_job_url_conflict
 from app.schemas.job import JobCreate, JobImportSummary
 
 
@@ -57,12 +58,20 @@ def import_jobs(session: Session, source_url: str) -> JobImportSummary:
     created = 0
     try:
         seen = set(session.scalars(select(Job.url).where(Job.url.in_(urls)))) if urls else set()
-        for job in normalized:
+        # Consistent lock ordering avoids deadlocks between overlapping batches.
+        for job in sorted(normalized, key=lambda item: item.url):
             if job.url in seen:
                 continue
-            session.add(Job(**job.model_dump()))
+            try:
+                with session.begin_nested():
+                    session.add(Job(**job.model_dump()))
+                    session.flush()
+            except IntegrityError as error:
+                if not is_job_url_conflict(error):
+                    raise
+            else:
+                created += 1
             seen.add(job.url)
-            created += 1
         session.commit()
     except SQLAlchemyError:
         session.rollback()

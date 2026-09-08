@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Identity, Integer, Text, false, func
+from sqlalchemy import Boolean, DateTime, Identity, Integer, Text, UniqueConstraint, false, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -8,6 +8,7 @@ from app.db.base import Base
 
 class Job(Base):
     __tablename__ = "jobs"
+    __table_args__ = (UniqueConstraint("url", name="uq_jobs_url"),)
 
     id: Mapped[int] = mapped_column(Integer, Identity(always=True), primary_key=True)
     title: Mapped[str] = mapped_column(Text)

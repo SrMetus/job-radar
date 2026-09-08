@@ -5,7 +5,7 @@ import runpy
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import Engine, create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -13,6 +13,51 @@ from app.core import config
 from app.models import Job
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_duplicate_url_rejected(engine: Engine, job_data: dict[str, str]) -> None:
+    with Session(engine) as session:
+        session.add(Job(**job_data))
+        session.commit()
+        session.add(Job(**job_data))
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()
+        assert session.scalar(text("SELECT count(*) FROM jobs")) == 1
+
+
+@pytest.mark.parametrize("duplicates", [False, True])
+def test_unique_migration_preserves_existing_data(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, duplicates: bool
+) -> None:
+    url = f"sqlite:///{tmp_path / 'migration.db'}"
+    monkeypatch.setenv("DATABASE_URL", url)
+    configuration = Config(str(ROOT / "alembic.ini"))
+    command.upgrade(configuration, "0001")
+    engine = create_engine(url)
+    try:
+        with engine.begin() as connection:
+            for index in range(2):
+                connection.execute(text(
+                    "INSERT INTO jobs (title, company, location, seniority, description, url) "
+                    "VALUES ('Title', 'Company', 'Location', 'junior', 'Description', :url)"
+                ), {"url": f"https://example.com/{0 if duplicates else index}"})
+            before = connection.execute(text("SELECT * FROM jobs ORDER BY id")).all()
+        if duplicates:
+            with pytest.raises(RuntimeError, match="duplicate URLs exist"):
+                command.upgrade(configuration, "head")
+        else:
+            command.upgrade(configuration, "head")
+            assert any(item["name"] == "uq_jobs_url" for item in inspect(engine).get_unique_constraints("jobs"))
+        with engine.connect() as connection:
+            assert connection.execute(text("SELECT * FROM jobs ORDER BY id")).all() == before
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == ("0001" if duplicates else "0002")
+        if not duplicates:
+            command.downgrade(configuration, "0001")
+            with engine.connect() as connection:
+                assert connection.execute(text("SELECT * FROM jobs ORDER BY id")).all() == before
+    finally:
+        engine.dispose()
 
 
 @pytest.mark.parametrize("value", [None, "", "   "])

@@ -2,8 +2,10 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 
 from app.api.dependencies import SessionDep
+from app.db.errors import is_job_url_conflict
 from app.core.config import get_external_job_source_url
 from app.models import Job
 from app.schemas.job import JobCreate, JobImportSummary, JobRead
@@ -16,7 +18,13 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 def create_job(job_in: JobCreate, session: SessionDep) -> Job:
     job = Job(**job_in.model_dump())
     session.add(job)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError as error:
+        session.rollback()
+        if is_job_url_conflict(error):
+            raise HTTPException(status_code=409, detail="A job with this URL already exists") from None
+        raise
     session.refresh(job)
     return job
 

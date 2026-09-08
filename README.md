@@ -5,7 +5,7 @@ A small FastAPI portfolio project for storing and browsing job offers.
 ## Endpoints
 
 - `GET /health`: API health check.
-- `POST /jobs`: create a job and return it with status 201.
+- `POST /jobs`: create a job with status 201; an existing URL returns 409.
 - `POST /jobs/import`: fetch the configured Remotive source and import new jobs.
 - `GET /jobs`: list jobs by newest creation time first, then descending ID.
 - `GET /jobs/{job_id}`: retrieve a job, or return 404 if it does not exist.
@@ -52,9 +52,17 @@ provider publication date. No existing jobs are updated or removed.
 
 Duplicate checks use exact, trimmed job URLs against the database and the current
 batch. Repeating an import sequentially skips existing URLs. URL aliases and
-tracking parameters are not canonicalized. There is no database uniqueness
-constraint, preserving existing `POST /jobs` behavior and existing data; run
-imports one at a time because concurrent imports can race.
+tracking parameters are not canonicalized. The named database constraint
+`uq_jobs_url` enforces URL uniqueness.
+The pre-check avoids unnecessary inserts, while per-record savepoints recover
+from competing URL inserts and count them as skipped. Other database failures
+are re-raised and roll back the import. URL equality is exact and case-sensitive.
+
+Migration `0002` preserves existing data. If duplicate URLs already exist, it
+stops before adding the constraint; it never chooses or deletes a duplicate row.
+Review conflicts with `SELECT url, count(*) FROM jobs GROUP BY url HAVING count(*) > 1`,
+resolve them deliberately, and retry `alembic upgrade head`. PostgreSQL holds a
+table lock during the check and constraint creation, so writes briefly wait.
 
 Source: [Remotive public API](https://github.com/remotive-com/remote-jobs-api).
 Its jobs are remote-only and delayed by 24 hours; location restrictions can still

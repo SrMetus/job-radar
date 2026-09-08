@@ -6,10 +6,46 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.core import config
 from app.models import Job
 from app.services import job_import
+
+
+def test_database_conflict_is_skipped_and_session_remains_usable(
+    engine: Engine, http_get: Mock, external_job: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    existing = job_import.normalize_remotive_job(external_job)
+    assert existing is not None
+    with Session(engine) as session:
+        session.add(Job(**existing.model_dump()))
+        session.commit()
+    mock_response(http_get, {"jobs": [external_job, {**external_job, "url": "https://remotive.com/new"}]})
+    with Session(engine) as session:
+        # Simulate a stale pre-check; the real unique constraint rejects the insert.
+        with monkeypatch.context() as patch:
+            patch.setattr(session, "scalars", lambda *args, **kwargs: [])
+            result = job_import.import_jobs(session, "https://provider.example/jobs")
+        assert result.model_dump() == {"fetched": 2, "created": 1, "skipped": 1}
+        assert session.scalar(select(func.count()).select_from(Job)) == 2
+        assert job_import.import_jobs(session, "https://provider.example/jobs").created == 0
+
+
+def test_non_url_integrity_error_is_not_swallowed(
+    engine: Engine, http_get: Mock, external_job: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sqlite3
+
+    mock_response(http_get, {"jobs": [external_job]})
+    with Session(engine) as session:
+        with monkeypatch.context() as patch:
+            patch.setattr(session, "flush", Mock(side_effect=IntegrityError(
+                "INSERT", {}, sqlite3.IntegrityError("NOT NULL constraint failed: jobs.title")
+            )))
+            with pytest.raises(IntegrityError):
+                job_import.import_jobs(session, "https://provider.example/jobs")
+        assert session.scalar(select(func.count()).select_from(Job)) == 0
 
 
 @pytest.fixture(autouse=True)

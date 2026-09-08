@@ -45,6 +45,8 @@ def test_list_jobs_newest_first(
         newest = Job(**job_data, created_at=datetime(2026, 1, 2, tzinfo=timezone.utc))
         older = Job(**job_data, created_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
         tied = Job(**job_data, created_at=datetime(2026, 1, 2, tzinfo=timezone.utc))
+        for index, job in enumerate([newest, older, tied]):
+            job.url = f"https://example.com/ordering/{index}"
         session.add_all([newest, older, tied])
         session.commit()
         expected_ids = [tied.id, newest.id, older.id]
@@ -65,6 +67,13 @@ def test_get_job_not_found(client: TestClient) -> None:
     response = client.get("/jobs/999")
     assert response.status_code == 404
     assert response.json() == {"detail": "Job not found"}
+
+
+def test_duplicate_url_returns_conflict(client: TestClient, job_data: dict[str, str]) -> None:
+    assert client.post("/jobs", json=job_data).status_code == 201
+    duplicate = client.post("/jobs", json=job_data)
+    assert duplicate.status_code == 409
+    assert client.post("/jobs", json={**job_data, "url": "https://example.com/new"}).status_code == 201
 
 
 def test_create_job_missing_fields_does_not_persist(
@@ -90,6 +99,7 @@ def filter_jobs(engine: Engine, job_data: dict[str, str]) -> list[int]:
         ]
         for day, job in enumerate(jobs, start=1):
             job.created_at = datetime(2026, 1, day, tzinfo=timezone.utc)
+            job.url = f"https://example.com/filter/{day}"
         session.add_all(jobs)
         session.commit()
         return [job.id for job in jobs]
@@ -118,6 +128,7 @@ def test_text_search_each_field(
 ) -> None:
     with Session(engine) as session:
         matching = Job(**{**job_data, field: "A NeEdLe inside text"})
+        matching.url = "https://example.com/matching"
         session.add_all([matching, Job(**job_data)])
         session.commit()
         expected_id = matching.id
@@ -132,6 +143,7 @@ def test_text_search_treats_wildcards_literally(
 ) -> None:
     with Session(engine) as session:
         matching = Job(**{**job_data, "title": f"Literal {query} character"})
+        matching.url = "https://example.com/matching"
         session.add_all([matching, Job(**job_data)])
         session.commit()
         expected_id = matching.id
@@ -176,8 +188,9 @@ def test_default_limit_is_twenty(
 ) -> None:
     with Session(engine) as session:
         jobs = [
-            Job(**job_data, created_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
-            for _ in range(21)
+            Job(**{**job_data, "url": f"https://example.com/page/{index}"},
+                created_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+            for index in range(21)
         ]
         session.add_all(jobs)
         session.commit()

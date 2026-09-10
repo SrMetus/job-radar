@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 from app.models import Job
 from app.services import python_org_import as scraper
 
+pytestmark = pytest.mark.usefixtures("authorize_imports")
+
 SOURCE = "https://www.python.org/jobs/"
 
 

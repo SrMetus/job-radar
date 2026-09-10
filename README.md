@@ -1,325 +1,380 @@
 # Job Radar
 
-A small FastAPI portfolio project for storing and browsing job offers.
+Job Radar aggregates job offers from Remotive and Python.org, normalizes their
+content, and stores them in PostgreSQL. A FastAPI REST API exposes the offers
+with a deterministic match score for a junior remote Python/backend profile.
 
-## Endpoints
+This small backend portfolio MVP focuses on persistence, repeatable imports,
+explicit failure handling, and automated tests. Python 3.12 is the target runtime.
 
-- `GET /health`: API health check.
-- `POST /jobs`: create a job with status 201; an existing URL returns 409.
-- `POST /jobs/import`: fetch the configured Remotive source and import new jobs.
-- `POST /jobs/import/python-org`: import the public Python.org HTML listing.
-- `GET /jobs`: list jobs by newest creation time first, then descending ID.
-- `GET /jobs/{job_id}`: retrieve a job, or return 404 if it does not exist.
+## Key features
 
-Apply migrations before using the jobs endpoints. Use <http://localhost:8000/docs>
-to submit a job with `title`, `company`, `location`, `seniority`, `description`,
-and `url` strings, plus an optional `remote` boolean (defaults to false).
-Responses include the generated `id` and `created_at` timestamp.
+- FastAPI REST API with Pydantic schemas and interactive Swagger documentation.
+- PostgreSQL persistence through SQLAlchemy 2.x and Alembic migrations.
+- Remotive JSON and Python.org HTML importers with shared URL deduplication.
+- Plain-text normalization, seniority inference, and dynamic `match_score` values.
+- Remote, seniority, and text filters; pagination; date and score sorting.
+- Import CLI for external schedulers, with independent source execution.
+- HTTP import endpoints protected by an environment-configured secret.
+- Docker Compose development environment and pytest tests run by GitHub Actions.
 
-Job responses also include a computed `match_score` from 0 to 100, targeting a
-junior remote Python/backend developer. Technologies count once: Python 20,
-FastAPI 10, PostgreSQL 10, SQLAlchemy 5, Docker 5, AWS 3, Git 2 (55 total).
-A relevant development title adds 15, and remote adds 10. Normalized seniority
-adds 20 for junior or 10 for intern; unknown adds zero. Senior subtracts 15;
-lead, staff and principal subtract 25. The final score is clamped to 0–100.
-Eligibility requires a backend/back-end/back end, Python, software engineer,
-software developer, developer or DevOps title, or Python/FastAPI/SQLAlchemy in
-actual content. Otherwise the score is zero, including unrelated remote roles.
-Matching is case-insensitive with word boundaries. Source metadata, URLs and
-HTML noise remain excluded. This is keyword relevance, not semantic analysis.
-Scores are computed during response serialization and are not stored. Existing
-listing filters and newest-first ordering are unchanged.
+## Architecture
 
-`GET /jobs` accepts optional `remote=true|false`, `seniority` (case-insensitive
-exact match), and `q` (case-insensitive substring search across title, company,
-location, and description). Filters combine with AND; `q` matches any of its
-four fields and treats `%` and `_` as literal characters. An empty `q` matches
-all jobs. Pagination applies after filtering: `limit` defaults to 20 (allowed
-range 1–100), and `offset` defaults to 0 (must be nonnegative). Invalid pagination
-values return 422. Responses remain JSON lists.
+```mermaid
+flowchart TD
+    Sources[Remotive JSON / Python.org HTML] --> Importers[Source importers]
+    Importers --> Normalize[Normalize job content]
+    Normalize --> Persist[Shared persistence and URL deduplication]
+    Persist --> DB[(PostgreSQL)]
+    DB --> API[FastAPI / dynamic match scoring]
+    API --> Consumers[API consumers]
+    Scheduler[External scheduler - configured separately] --> CLI[python -m app.tasks.import_jobs]
+    CLI --> Runner[Import orchestrator]
+    Runner --> Importers
+    API -->|Protected HTTP import endpoints| Importers
+```
 
-Example: <http://localhost:8000/jobs?remote=true&seniority=junior&q=python&limit=10&offset=0>.
+The CLI and HTTP endpoints reuse the same import services. Scheduling runs
+outside the FastAPI process; the repository does not install or start a scheduler.
 
-Sorting accepts `sort=created_at|match_score` and `order=asc|desc`; defaults are
-`created_at` and `desc`. Unsupported values return 422. Examples:
+## Project structure
 
 ```text
-GET /jobs?sort=match_score
-GET /jobs?sort=match_score&order=asc
-GET /jobs?remote=true&seniority=junior&sort=match_score
+app/
+  main.py                    FastAPI application and health endpoint
+  api/                       Job routes, DB dependency, import authentication
+  core/config.py             Environment and .env configuration
+  db/                        SQLAlchemy base and session setup
+  models/job.py              Persisted job model
+  schemas/job.py             Request, response, and import summary schemas
+  services/
+    job_import.py            Remotive importer and shared persistence
+    python_org_import.py     Python.org HTML importer
+    job_normalization.py     Content cleaning and seniority inference
+    job_scoring.py           Deterministic matching rules
+    import_runner.py         Independent execution of both sources
+  tasks/import_jobs.py       One-shot import CLI
+alembic/                     Database migrations
+tests/                       API, service, CLI, and migration tests; HTML fixture
+.github/workflows/ci.yml      Python 3.12 test workflow
+Dockerfile                   Python 3.12 image running as a non-root user
+docker-compose.yml           API and PostgreSQL services
+.env.example                 Configuration template
 ```
 
-Date sorting uses SQL ordering and pagination (ID follows the date direction for
-ties). Score sorting filters in SQL, loads all matching candidates, computes
-scores in Python, sorts, then applies offset/limit. Equal scores always use
-creation time descending, then ID descending, even for ascending scores. This
-keeps pagination correct but uses memory and scoring time proportional to the
-filtered candidate count; it is an intentional MVP trade-off. Scores are neither
-stored nor duplicated in SQL.
+## Match scoring
 
-## External imports
+`match_score` ranges from **0 to 100** and targets a junior remote Python/backend
+developer. It is computed dynamically from the title, description, remote flag,
+and seniority; it is not stored in the database.
 
-Both HTTP import endpoints require `X-Import-Secret` matching `IMPORT_SECRET`
-in the server environment or `.env`. Choose a long random secret (for example,
-generate one with `python -c "import secrets; print(secrets.token_urlsafe(32))"`).
-Never commit or log the secret; use HTTPS when deployed publicly. Missing or
-incorrect headers return 403. An unset/blank server secret disables HTTP imports
-with 503. Other endpoints remain unchanged. Swagger's Authorize button accepts
-this header credential.
+A job qualifies for scoring when its title contains `backend`, `back-end`,
+`back end`, `python`, `software engineer`, `software developer`, `developer`, or
+`devops`, or its title/description contains `python`, `fastapi`, or `sqlalchemy`.
+Otherwise its score is zero, even when it is remote or marked junior.
 
-Set `EXTERNAL_JOB_SOURCE_URL` in `.env` to the Remotive JSON endpoint shown in
-`.env.example`. Existing shell environment values take precedence. For an
-existing Docker stack, recreate the app after changing configuration:
+| Signal | Points |
+| --- | --- |
+| Technologies in title/description, each counted once | Python +20; FastAPI +10; PostgreSQL +10; SQLAlchemy +5; Docker +5; AWS +3; Git +2 |
+| Relevant title matching the terms above | +15 |
+| Remote | +10 |
+| Junior / intern | +20 / +10 |
+| Unknown or unrecognized seniority | 0 |
+| Senior | -15 |
+| Lead, staff, or principal | -25 |
+
+Matches are case-insensitive and use word boundaries. Scoring removes HTML noise,
+URLs, and legacy `Source:` lines; company and location do not contribute points.
+The final sum is clamped to 0–100. This is deterministic keyword relevance,
+not semantic or AI analysis.
+
+Score sorting loads all filtered candidates into memory, calculates scores,
+sorts, then paginates. Its memory and processing cost grow with the filtered
+result set; date sorting and pagination run in SQL.
+
+## API
+
+| Method | Endpoint | Behavior |
+| --- | --- | --- |
+| GET | `/health` | Returns `{"status":"ok"}`; does not check the database |
+| POST | `/jobs` | Creates a job (201); duplicate URL returns 409 |
+| GET | `/jobs` | Returns a filtered, sorted, paginated JSON list |
+| GET | `/jobs/{job_id}` | Returns a job, or 404 |
+| POST | `/jobs/import` | Imports Remotive; requires `X-Import-Secret` |
+| POST | `/jobs/import/python-org` | Imports Python.org; requires `X-Import-Secret` |
+
+Job creation requires `title`, `company`, `location`, `seniority`, `description`,
+and `url` strings. `remote` is optional and defaults to false. Responses include
+these fields plus `id`, `created_at`, and `match_score`. Seniority is stored as
+plain text. Use Swagger to inspect schemas and submit requests.
+
+### Filtering, pagination, and sorting
+
+| Parameter | Behavior |
+| --- | --- |
+| `remote` | `true` or `false` |
+| `seniority` | Case-insensitive exact match |
+| `q` | Case-insensitive substring in title, company, location, or description |
+| `limit` | Default 20; allowed 1–100 |
+| `offset` | Default 0; must be nonnegative |
+| `sort` | `created_at` (default) or `match_score` |
+| `order` | `desc` (default) or `asc` |
+
+Filters combine with AND; `q` matches any of its four fields. `%` and `_` are
+literal search characters, and an empty `q` matches all jobs. Invalid pagination
+or sorting values return 422. Technology searches use `q`; there is no separate
+technology parameter.
+
+```text
+GET /jobs?remote=true
+GET /jobs?seniority=junior&q=python
+GET /jobs?remote=true&seniority=junior&q=fastapi&limit=10&offset=10
+GET /jobs?sort=match_score&order=desc
+GET /jobs?sort=created_at&order=asc
+```
+
+Date ties use ID in the same direction. Score ties always use newest creation
+time first, then descending ID, including when score order is ascending.
+
+### HTTP import authentication
+
+Set a long random `IMPORT_SECRET` in the server environment or `.env`, then send
+its exact value in `X-Import-Secret`. Comparison uses `secrets.compare_digest`.
+Swagger's **Authorize** button also accepts this credential.
 
 ```bash
-docker compose up --build -d
+# Bash: assumes IMPORT_SECRET is already exported in this shell.
 curl -X POST -H "X-Import-Secret: $IMPORT_SECRET" http://localhost:8000/jobs/import
+curl -X POST -H "X-Import-Secret: $IMPORT_SECRET" http://localhost:8000/jobs/import/python-org
 ```
 
-The shell example assumes `IMPORT_SECRET` is exported in your shell; PowerShell
-uses `$env:IMPORT_SECRET`. No request body or provider API key is needed.
-The response contains `fetched`, `created`,
-and `skipped`; fetched counts the returned records, and skipped includes malformed
-records and duplicate URLs. Missing/invalid source configuration returns 503.
-Provider HTTP errors, timeouts, invalid JSON, and invalid response structure return
-502 without importing anything. Valid records are committed together.
+PowerShell can use `Invoke-RestMethod` with an environment variable:
 
-The importer supports Remotive's `jobs` JSON array only. It maps `company_name`
-to company and `candidate_required_location` to location, sets remote to true and
-infers seniority from the title, and trims required text. Missing/blank/non-string
-fields and invalid HTTP(S) job URLs are skipped. Descriptions become plain text
-with paragraph/list line breaks; styles, scripts, images and source prefixes are
-not added to job content. Records with no readable description are skipped.
-`created_at` is the local import time, not the
-provider publication date. No existing jobs are updated or removed.
+```powershell
+Invoke-RestMethod -Method Post -Uri http://localhost:8000/jobs/import -Headers @{"X-Import-Secret" = $env:IMPORT_SECRET}
+```
 
-Duplicate checks use exact, trimmed job URLs against the database and the current
-batch. Repeating an import sequentially skips existing URLs. URL aliases and
-tracking parameters are not canonicalized. The named database constraint
-`uq_jobs_url` enforces URL uniqueness.
-The pre-check avoids unnecessary inserts, while per-record savepoints recover
-from competing URL inserts and count them as skipped. Other database failures
-are re-raised and roll back the import. URL equality is exact and case-sensitive.
+The server's `.env` does not automatically populate your shell environment.
+Missing or incorrect headers return 403. An unset or blank server secret disables
+HTTP imports with 503. Use HTTPS for public access and keep the secret out of
+source control and logs.
 
-Migration `0002` preserves existing data. If duplicate URLs already exist, it
-stops before adding the constraint; it never chooses or deletes a duplicate row.
-Review conflicts with `SELECT url, count(*) FROM jobs GROUP BY url HAVING count(*) > 1`,
-resolve them deliberately, and retry `alembic upgrade head`. PostgreSQL holds a
-table lock during the check and constraint creation, so writes briefly wait.
+**This protection applies only to imports.** `POST /jobs` and read endpoints
+remain unauthenticated; there is no user/account system.
 
-Source: [Remotive public API](https://github.com/remotive-com/remote-jobs-api).
-Its jobs are remote-only and delayed by 24 hours; location restrictions can still
-apply. Remotive recommends at most four fetches per day and blocks excessive
-requests. Preserve its attribution and links and follow its redistribution terms.
-There is no automatic polling or retry loop. The example URL limits each fetch
-to 20 software jobs; it is not a complete historical job archive.
+## Sources and data handling
 
-## HTML imports
+| Source | Imported content and boundaries |
+| --- | --- |
+| [Remotive](https://github.com/remotive-com/remote-jobs-api) | Reads the public `jobs` JSON array. Maps company and location fields, sets remote to true, and converts descriptions to plain text. Invalid records and empty descriptions are skipped. The example configuration requests 20 software jobs. |
+| [Python.org](https://www.python.org/jobs/) | Fetches one HTML listing page using HTTPX and BeautifulSoup. No pagination or detail crawling. Descriptions contain available categories and may be empty. Remote is inferred from title/location wording, with explicit negations handled. |
 
-The HTML importer uses `PYTHON_ORG_JOBS_URL=https://www.python.org/jobs/` from
-`.env`. Recreate the app after setting it, then call
-`curl -X POST -H "X-Import-Secret: $IMPORT_SECRET" http://localhost:8000/jobs/import/python-org`.
-It returns the same fetched/created/skipped summary as Remotive and shares its
-URL pre-check, unique constraint, and savepoint conflict recovery.
+Both importers infer seniority from title keywords, with precedence: principal,
+staff, lead, senior/sr, junior/jr/entry-level, then intern/internship. Missing
+signals mean `unknown`; remote and seniority heuristics can miss ambiguous roles.
 
-Only the configured Python.org listing page is fetched, with no pagination or
-detail-page crawling. Descriptions contain only available job categories, not
-source names or URLs; they are empty when no categories are present.
-Remote is inferred from title/location wording; missing evidence means false,
-and seniority is inferred from the title. These heuristics can miss hybrid or ambiguous roles.
-Malformed cards are skipped. Missing listing markup, HTTP errors, redirects,
-and non-HTML responses return 502; invalid configuration returns 503. No bypass
-of access restrictions is attempted. HTML selectors can break when the site
-changes; imported rows are not refreshed or deleted when postings disappear.
-Source: [Python.org Job Board](https://www.python.org/jobs/).
-BeautifulSoup is the only added direct dependency; it uses Python's built-in
-HTML parser. Automated tests use representative local HTML fixtures.
+Imports report `fetched`, `created`, and `skipped`; skipped includes malformed
+records and duplicate URLs. Invalid source configuration returns 503 over HTTP;
+provider failures or invalid responses return 502. Python.org also rejects
+redirects, non-HTML responses, and missing listing markup.
 
-## External scheduling
+Shared persistence checks exact, case-sensitive job URLs and uses the database
+constraint `uq_jobs_url` plus per-record savepoints to recover from competing URL
+inserts. Imported URLs are trimmed; aliases and tracking parameters are not
+canonicalized. Other database failures roll back the batch.
 
-The scheduler-friendly entry point runs once and exits:
+Reimports skip existing URLs without updating or deleting jobs. `created_at`
+is the local insertion time, not the provider's publication date. Existing rows
+are not automatically refreshed after normalization changes or removed when a
+source posting disappears. Follow each source's current usage and attribution
+requirements when collecting or redistributing its content.
+
+## Automated imports
+
+Run once from the repository root with database and source settings configured
+and migrations applied:
 
 ```bash
 python -m app.tasks.import_jobs
-# With the Docker stack running:
+```
+
+For a running Docker stack:
+
+```bash
 docker compose exec -T app python -m app.tasks.import_jobs
 ```
 
-Apply migrations first and configure `DATABASE_URL`, `EXTERNAL_JOB_SOURCE_URL`,
-and `PYTHON_ORG_JOBS_URL`. The CLI accesses the database directly and does not
-require `IMPORT_SECRET` or a running FastAPI server. It attempts Remotive and
-Python.org sequentially, reporting missing/invalid source settings as failures.
-Each source uses a fresh session that is closed after the attempt, rolling back
-unfinished work. Successful sources commit independently through the existing
-import services and retain their results if another source fails.
+- Remotive and Python.org are attempted sequentially, each with an independent
+  database session that closes after the attempt and rolls back unfinished work.
+- A source failure does not stop the remaining source or undo its committed work.
+  Missing/invalid source settings count as failures.
+- Each source prints its status and fetched/created/skipped counts. Failed
+  attempts report the exception type and `unknown` counts.
+- Exit status is 0 when both sources succeed and 1 if any source fails, after all
+  attempts. Database initialization failure also exits 1.
+- The CLI uses the database directly; it requires neither an HTTP import secret
+  nor a running FastAPI server.
 
-Output includes a line per source with status and fetched/created/skipped counts.
-On failure the exception type is shown, with counts marked `unknown` because
-the importer did not return a completed summary. Exit status is 0 when all
-sources succeed and 1 if any fails, after all have been attempted. Database
-initialization failure also exits 1. Repeated runs reuse URL deduplication.
+Configure cron, a systemd timer, or Windows Task Scheduler separately, using the
+correct working directory, Python environment, and database access. Keep runs
+infrequent (the example configuration advises at most four daily Remotive
+fetches), prevent overlap in the scheduler, and capture output and exit codes.
+There is no built-in retry loop or scheduling thread.
 
-Scheduling belongs outside FastAPI, for example in cron, systemd timers, or
-Windows Task Scheduler. Configure the repository working directory, Python
-environment, and database access there. Use a conservative interval (at most
-four runs daily for Remotive), prevent overlapping runs in the scheduler, and
-capture output and non-zero exit codes. There is no in-process scheduler,
-background worker, polling loop, or automatic retry.
+## Local setup
 
-## Docker setup
+### Docker Compose
 
-Install Docker with Compose (Docker Desktop with Linux containers on Windows).
-From the repository root, copy `.env.example` to `.env`:
+Requires Docker with Compose and Linux containers. Run commands from the
+repository root. Copy the configuration template:
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-On macOS/Linux, use `cp .env.example .env`. Choose a local `POSTGRES_PASSWORD`
-and set the same credentials in `DATABASE_URL`, URL-encoding special characters
-in the URL. Keep the URL hostname as `db`, the Compose PostgreSQL service name.
-`POSTGRES_DB` and `POSTGRES_USER` must also match the URL. For passwords containing
-`$`, single-quote the value in `.env` to prevent Compose interpolation.
-The `.env` file is ignored by Git and excluded from the image build.
+On macOS/Linux, use `cp .env.example .env`. Set `POSTGRES_PASSWORD` and matching
+credentials in `DATABASE_URL`, URL-encoding credentials in the URL. Keep `db` as
+the hostname. `POSTGRES_DB` and `POSTGRES_USER` must also match the URL.
+Single-quote `.env` values containing `$` to avoid Compose interpolation.
+Set `IMPORT_SECRET` only if HTTP imports should be enabled.
 
-Build and start the stack:
-
-```bash
-docker compose up --build
-```
-
-The app waits for PostgreSQL to be healthy and serves the API on
-<http://localhost:8000/health>, returning `{"status": "ok"}`. API documentation is
-at <http://localhost:8000/docs>. Add `-d` to run the stack in the background.
-Port 8000 must be available. PostgreSQL is accessible to the app on `db:5432`
-inside the Compose network.
-
-In another terminal, apply the existing Alembic migrations and check the schema:
+Build, start, and migrate:
 
 ```bash
+docker compose up --build -d
 docker compose exec app python -m alembic upgrade head
-docker compose exec app python -m alembic current
+```
+
+The API container waits for PostgreSQL health before starting Uvicorn on port
+8000. Migrations are explicit and must run before using jobs or imports.
+
+- [Swagger UI](http://localhost:8000/docs)
+- [Health endpoint](http://localhost:8000/health)
+
+Check the schema, view logs, or stop the stack:
+
+```bash
 docker compose exec app python -m alembic check
-```
-
-Migrations run explicitly, not on every server startup. `/health` checks the API;
-running Alembic verifies the app container can connect to PostgreSQL.
-
-Run the tests inside the Python 3.12 app container:
-
-```bash
-docker compose exec app python -m pytest -p no:cacheprovider
-```
-
-Inspect status/logs or stop the stack:
-
-```bash
-docker compose ps
 docker compose logs app db
 docker compose down
 ```
 
-PostgreSQL data persists in the named `postgres_data` volume across container
-recreation and `docker compose down`. Database initialization variables only
-apply to an empty volume; editing `.env` does not change existing database
-credentials. Avoid `docker compose down -v` unless you intend to delete the data.
+PostgreSQL 17 stores data in `postgres_data`, which survives container recreation
+and `docker compose down`. Compose does not publish the database port to the
+host. Initialization credentials apply only to an empty volume; editing `.env`
+does not change existing database credentials. Recreate the app with
+`docker compose up --build -d` after configuration changes. `.env` is ignored by
+Git and excluded from the image.
 
-## Setup
+### Without Docker
 
-Use Python 3.12. From the repository root:
+Use Python 3.12 and a separately accessible PostgreSQL database. Copy and edit
+`.env` as above, changing `DATABASE_URL` to your database host (`localhost` for
+a local installation).
 
 ```bash
 python -m venv .venv
 ```
 
-Activate the environment:
-
-- Windows PowerShell: `.\.venv\Scripts\Activate.ps1`
-- macOS/Linux: `source .venv/bin/activate`
-
-Install dependencies and start the development server:
+Activate with `.\.venv\Scripts\Activate.ps1` on PowerShell, or
+`source .venv/bin/activate` on macOS/Linux. Then run:
 
 ```bash
 python -m pip install -r requirements.txt
+python -m alembic upgrade head
 fastapi dev app/main.py
 ```
 
-Visit <http://127.0.0.1:8000/health> for `{"status": "ok"}` or
-<http://127.0.0.1:8000/docs> for API documentation.
+Swagger is available at [localhost:8000/docs](http://localhost:8000/docs).
 
-## Database
+### Existing databases
 
-For development without Docker, create a local PostgreSQL database, then copy
-`.env.example` to `.env` and replace the connection placeholders with your own
-details, changing the URL hostname from `db` to `localhost`. Use the
-`postgresql+psycopg://` URL scheme and URL-encode special characters in credentials.
-An existing `DATABASE_URL` environment variable takes precedence over `.env`.
-Database operations fail clearly if the URL is missing; `/health` remains independent
-of the database.
+Migration `0002` stops if duplicate URLs exist, without choosing or deleting
+rows. Inspect conflicts before resolving them and retrying the migration:
 
-Apply the initial migration from the repository root:
-
-```bash
-python -m alembic upgrade head
+```sql
+SELECT url, count(*) FROM jobs GROUP BY url HAVING count(*) > 1;
 ```
 
-For future model changes, generate and review a migration before applying it:
+PostgreSQL holds a table lock during this migration, so concurrent writes wait.
 
-```bash
-python -m alembic revision --autogenerate -m "describe change"
-python -m alembic upgrade head
-```
+## Environment variables
 
-The `jobs` table stores the job title, company, location, remote flag, seniority,
-description, and URL. These fields are required; `remote` defaults to false.
-PostgreSQL generates the integer ID and timezone-aware creation timestamp.
-Seniority is plain text until the API defines its allowed values.
+Application settings load from the environment or the root `.env`; existing
+environment values take precedence. See `.env.example` for placeholders.
 
-## Tests
+| Variable | Purpose |
+| --- | --- |
+| `POSTGRES_DB` | Database initialized by Compose; template uses `job_radar` |
+| `POSTGRES_USER` | Database user initialized by Compose; template uses `job_radar` |
+| `POSTGRES_PASSWORD` | Database password; replace the template placeholder |
+| `DATABASE_URL` | SQLAlchemy connection URL using `postgresql+psycopg://`; required for DB operations |
+| `EXTERNAL_JOB_SOURCE_URL` | Remotive JSON endpoint; required for its import |
+| `PYTHON_ORG_JOBS_URL` | Python.org listing URL; must point to `https://www.python.org/jobs/` |
+| `IMPORT_SECRET` | Secret for HTTP imports; blank disables them; not required by the CLI |
+
+The three `POSTGRES_*` variables initialize the Compose database; application
+connections use `DATABASE_URL`. No provider API key is needed by these importers.
+
+## Testing
+
+With dependencies installed:
 
 ```bash
 python -m pytest
 ```
 
-Database tests use temporary SQLite databases for persistence, required fields,
-and migration upgrade/downgrade checks. They also render PostgreSQL migration SQL
-and verify the Psycopg driver loads. They do not require or connect to a live
-PostgreSQL server, so they do not validate PostgreSQL runtime behavior.
+Inside the running Python 3.12 Docker container:
 
-## Structure
+```bash
+docker compose exec app python -m pytest -p no:cacheprovider
+```
 
-`app/main.py` contains the application and health endpoint. Database configuration
-lives in `app/core/config.py`, Base and session setup in `app/db/`, and the typed
-Job model in `app/models/`. Alembic migrations live in `alembic/versions/`.
-Request/response schemas live in `app/schemas/`, and the jobs router and session
-dependency live in `app/api/`. External fetching and Remotive normalization live
-in `app/services/job_import.py`.
-Tests live in `tests/`; API tests override the session dependency with isolated
-SQLite databases.
+The Docker command disables pytest's cache because application files are owned
+by root and the container runs as a non-root user.
 
-FastAPI's standard dependencies provide the development server and CLI. pytest
-runs the tests, and HTTPX handles external API requests and FastAPI's test client.
-Automated import tests mock HTTP responses and never call the public provider.
-SQLAlchemy 2.x provides the ORM, Psycopg 3 (binary distribution) connects to
-PostgreSQL without a local compiler, Alembic manages schema migrations, and
-python-dotenv loads local database configuration.
+Tests cover API behavior, filters, sorting, scoring, normalization, deduplication,
+source failure isolation, CLI exit codes, import authentication, and migrations.
+HTTP responses are mocked and HTML comes from a local fixture. Database tests
+use temporary SQLite databases, render PostgreSQL migration SQL, and verify the
+Psycopg driver loads. They do not validate a live PostgreSQL server's runtime
+behavior.
 
-## Imported content normalization
+## CI
 
-Both importers infer seniority from whole-word title signals, case-insensitively.
-Precedence for multiple signals is principal, staff, lead (including tech/team
-lead), senior/sr, junior/jr/entry-level, then intern/internship. No signal means
-unknown; absence of a senior keyword never implies junior.
-Scoring ignores HTML markup, URLs and legacy Source: lines, while retaining real
-visible job text. Provider attribution belongs outside the description; source
-links remain in the job URL and this documentation.
+GitHub Actions runs on pushes and pull requests targeting `main`. The workflow
+uses Ubuntu and Python 3.12, installs `requirements.txt`, and runs
+`python -m pytest`. It does not deploy the application or run a live PostgreSQL
+service.
 
-Existing development rows are not automatically rewritten. Reimports skip their
-URLs. To refresh them, back up the database, inspect the old imported rows by URL
-and legacy Source: description prefix, and record their IDs. In a database
-transaction, delete only those reviewed IDs, verify the affected count, and
-commit (or roll back if unexpected). Then rebuild the Docker app and invoke the
-corresponding import endpoint. Do not truncate the table or remove the volume
-unless all development data is intentionally disposable. Reimported rows receive
-new IDs and creation timestamps; postings no longer offered by the source will
-not return. No startup cleanup or data migration is included.
+## Design decisions and trade-offs
+
+- **External scheduling:** a one-shot command keeps periodic imports separate
+  from API workers. No Celery or Redis is needed for this MVP's sequential runs.
+- **Deterministic scoring:** explicit rules keep the target profile explainable
+  and testable; they do not understand semantic relevance.
+- **In-memory score sorting:** keeps scoring in one place and is acceptable for
+  the current small MVP scope, but needs revisiting for larger candidate sets.
+- **HTML source dependency:** Python.org imports depend on external markup and
+  may need selector updates when the page changes.
+- **Insert-only imports:** exact URL deduplication makes repeated runs safe from
+  duplicate rows, while leaving stale postings and URL aliases unresolved.
+
+## Roadmap
+
+Future work; these features are not implemented:
+
+- Additional job sources.
+- Configurable matching profiles.
+- Notifications and alerts.
+- A small web frontend.
+- Public deployment.
+
+## Support
+
+Support links will be added before public launch. Buy Me a Coffee, Ko-fi, and
+PayPal links are not configured yet.
+
+## License
+
+No `LICENSE` file is currently included in this repository.

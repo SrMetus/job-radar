@@ -8,6 +8,14 @@ from pydantic import HttpUrl, TypeAdapter, ValidationError
 ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 
+def get_import_secret() -> str:
+    load_dotenv(dotenv_path=ENV_FILE, override=False)
+    secret = os.getenv("IMPORT_SECRET", "")
+    if not secret.strip():
+        raise ValueError("HTTP imports are disabled: IMPORT_SECRET is not configured.")
+    return secret
+
+
 def get_database_url() -> str:
     load_dotenv(dotenv_path=ENV_FILE, override=False)
     database_url = os.getenv("DATABASE_URL", "").strip()

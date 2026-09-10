@@ -38,6 +38,12 @@ def client(engine: Engine) -> Generator[TestClient, None, None]:
 
 
 @pytest.fixture
+def authorize_imports(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("IMPORT_SECRET", "test-only-import-secret")
+    client.headers["X-Import-Secret"] = "test-only-import-secret"
+
+
+@pytest.fixture
 def job_data() -> dict[str, str]:
     return {
         "title": "Backend Developer",

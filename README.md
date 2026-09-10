@@ -59,16 +59,26 @@ stored nor duplicated in SQL.
 
 ## External imports
 
+Both HTTP import endpoints require `X-Import-Secret` matching `IMPORT_SECRET`
+in the server environment or `.env`. Choose a long random secret (for example,
+generate one with `python -c "import secrets; print(secrets.token_urlsafe(32))"`).
+Never commit or log the secret; use HTTPS when deployed publicly. Missing or
+incorrect headers return 403. An unset/blank server secret disables HTTP imports
+with 503. Other endpoints remain unchanged. Swagger's Authorize button accepts
+this header credential.
+
 Set `EXTERNAL_JOB_SOURCE_URL` in `.env` to the Remotive JSON endpoint shown in
 `.env.example`. Existing shell environment values take precedence. For an
 existing Docker stack, recreate the app after changing configuration:
 
 ```bash
 docker compose up --build -d
-curl -X POST http://localhost:8000/jobs/import
+curl -X POST -H "X-Import-Secret: $IMPORT_SECRET" http://localhost:8000/jobs/import
 ```
 
-No request body or API key is needed. The response contains `fetched`, `created`,
+The shell example assumes `IMPORT_SECRET` is exported in your shell; PowerShell
+uses `$env:IMPORT_SECRET`. No request body or provider API key is needed.
+The response contains `fetched`, `created`,
 and `skipped`; fetched counts the returned records, and skipped includes malformed
 records and duplicate URLs. Missing/invalid source configuration returns 503.
 Provider HTTP errors, timeouts, invalid JSON, and invalid response structure return
@@ -108,7 +118,7 @@ to 20 software jobs; it is not a complete historical job archive.
 
 The HTML importer uses `PYTHON_ORG_JOBS_URL=https://www.python.org/jobs/` from
 `.env`. Recreate the app after setting it, then call
-`curl -X POST http://localhost:8000/jobs/import/python-org`.
+`curl -X POST -H "X-Import-Secret: $IMPORT_SECRET" http://localhost:8000/jobs/import/python-org`.
 It returns the same fetched/created/skipped summary as Remotive and shares its
 URL pre-check, unique constraint, and savepoint conflict recovery.
 
@@ -124,6 +134,37 @@ changes; imported rows are not refreshed or deleted when postings disappear.
 Source: [Python.org Job Board](https://www.python.org/jobs/).
 BeautifulSoup is the only added direct dependency; it uses Python's built-in
 HTML parser. Automated tests use representative local HTML fixtures.
+
+## External scheduling
+
+The scheduler-friendly entry point runs once and exits:
+
+```bash
+python -m app.tasks.import_jobs
+# With the Docker stack running:
+docker compose exec -T app python -m app.tasks.import_jobs
+```
+
+Apply migrations first and configure `DATABASE_URL`, `EXTERNAL_JOB_SOURCE_URL`,
+and `PYTHON_ORG_JOBS_URL`. The CLI accesses the database directly and does not
+require `IMPORT_SECRET` or a running FastAPI server. It attempts Remotive and
+Python.org sequentially, reporting missing/invalid source settings as failures.
+Each source uses a fresh session that is closed after the attempt, rolling back
+unfinished work. Successful sources commit independently through the existing
+import services and retain their results if another source fails.
+
+Output includes a line per source with status and fetched/created/skipped counts.
+On failure the exception type is shown, with counts marked `unknown` because
+the importer did not return a completed summary. Exit status is 0 when all
+sources succeed and 1 if any fails, after all have been attempted. Database
+initialization failure also exits 1. Repeated runs reuse URL deduplication.
+
+Scheduling belongs outside FastAPI, for example in cron, systemd timers, or
+Windows Task Scheduler. Configure the repository working directory, Python
+environment, and database access there. Use a conservative interval (at most
+four runs daily for Remotive), prevent overlapping runs in the scheduler, and
+capture output and non-zero exit codes. There is no in-process scheduler,
+background worker, polling loop, or automatic retry.
 
 ## Docker setup
 

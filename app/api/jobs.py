@@ -1,10 +1,10 @@
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 
-from app.api.dependencies import SessionDep
+from app.api.dependencies import SessionDep, require_import_secret
 from app.db.errors import is_job_url_conflict
 from app.core.config import get_external_job_source_url, get_python_org_jobs_url
 from app.models import Job
@@ -76,7 +76,8 @@ def list_jobs(
     return list(session.scalars(statement).all())
 
 
-@router.post("/import", response_model=JobImportSummary)
+@router.post("/import", response_model=JobImportSummary,
+             dependencies=[Depends(require_import_secret)])
 def import_external_jobs(session: SessionDep) -> JobImportSummary:
     try:
         source_url = get_external_job_source_url()
@@ -88,7 +89,8 @@ def import_external_jobs(session: SessionDep) -> JobImportSummary:
         raise HTTPException(status_code=502, detail=str(error)) from None
 
 
-@router.post("/import/python-org", response_model=JobImportSummary)
+@router.post("/import/python-org", response_model=JobImportSummary,
+             dependencies=[Depends(require_import_secret)])
 def import_html_jobs(session: SessionDep) -> JobImportSummary:
     try:
         source_url = get_python_org_jobs_url()

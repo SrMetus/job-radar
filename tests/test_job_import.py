@@ -12,6 +12,8 @@ from app.core import config
 from app.models import Job
 from app.services import job_import
 
+pytestmark = pytest.mark.usefixtures("authorize_imports")
+
 
 def test_database_conflict_is_skipped_and_session_remains_usable(
     engine: Engine, http_get: Mock, external_job: dict[str, object], monkeypatch: pytest.MonkeyPatch

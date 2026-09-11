@@ -10,6 +10,7 @@ explicit failure handling, and automated tests. Python 3.12 is the target runtim
 ## Key features
 
 - FastAPI REST API with Pydantic schemas and interactive Swagger documentation.
+- Responsive landing page and job browser at `/`, using plain HTML, CSS, and JavaScript.
 - PostgreSQL persistence through SQLAlchemy 2.x and Alembic migrations.
 - Remotive JSON and Python.org HTML importers with shared URL deduplication.
 - Plain-text normalization, seniority inference, and dynamic `match_score` values.
@@ -28,6 +29,7 @@ flowchart TD
     Persist --> DB[(PostgreSQL)]
     DB --> API[FastAPI / dynamic match scoring]
     API --> Consumers[API consumers]
+    API --> Web[Integrated web job browser]
     Scheduler[External scheduler - configured separately] --> CLI[python -m app.tasks.import_jobs]
     CLI --> Runner[Import orchestrator]
     Runner --> Importers
@@ -42,6 +44,7 @@ outside the FastAPI process; the repository does not install or start a schedule
 ```text
 app/
   main.py                    FastAPI application and health endpoint
+  static/                    Landing page, CSS, JavaScript, and public link settings
   api/                       Job routes, DB dependency, import authentication
   core/config.py             Environment and .env configuration
   db/                        SQLAlchemy base and session setup
@@ -96,6 +99,7 @@ result set; date sorting and pagination run in SQL.
 
 | Method | Endpoint | Behavior |
 | --- | --- | --- |
+| GET | `/` | Landing page and interactive job browser |
 | GET | `/health` | Returns `{"status":"ok"}`; does not check the database |
 | POST | `/jobs` | Creates a job (201); duplicate URL returns 409 |
 | GET | `/jobs` | Returns a filtered, sorted, paginated JSON list |
@@ -223,6 +227,26 @@ There is no built-in retry loop or scheduling thread.
 
 ## Local setup
 
+### Web interface
+
+Open [Job Radar](http://localhost:8000/) after starting the app. The browser calls
+the existing `GET /jobs` API, requesting 12 records per page with a Load more
+button. Its initial sort is match score descending; the API's own defaults are
+unchanged. Search, work mode, seniority, sort, and order apply when Search is
+submitted. Loading, empty, and error states are included, with manual retry.
+JavaScript is required for the interactive browser.
+
+FastAPI serves the page and `/static/` assets directly, with no frontend framework,
+build step, or additional dependency. The browser never invokes import endpoints.
+Job text is inserted as text, and external links accept only HTTP(S) URLs without
+embedded credentials and open with `noopener noreferrer`.
+
+To activate GitHub or support links, edit the public `app/static/links.json` keys
+`github`, `buy_me_a_coffee`, and `paypal`. Leave unconfigured values empty;
+the page shows non-clickable placeholders. This file is publicly served: put only
+public destination URLs here, never secrets. Rebuild the Docker image after asset
+changes. The frontend is implemented; public deployment remains future work.
+
 ### Docker Compose
 
 Requires Docker with Compose and Linux containers. Run commands from the
@@ -249,6 +273,7 @@ The API container waits for PostgreSQL health before starting Uvicorn on port
 8000. Migrations are explicit and must run before using jobs or imports.
 
 - [Swagger UI](http://localhost:8000/docs)
+- [Job browser](http://localhost:8000/)
 - [Health endpoint](http://localhost:8000/health)
 
 Check the schema, view logs, or stop the stack:
@@ -334,7 +359,8 @@ The Docker command disables pytest's cache because application files are owned
 by root and the container runs as a non-root user.
 
 Tests cover API behavior, filters, sorting, scoring, normalization, deduplication,
-source failure isolation, CLI exit codes, import authentication, and migrations.
+source failure isolation, CLI exit codes, import authentication, migrations,
+and frontend HTML/static integration.
 HTTP responses are mocked and HTML comes from a local fixture. Database tests
 use temporary SQLite databases, render PostgreSQL migration SQL, and verify the
 Psycopg driver loads. They do not validate a live PostgreSQL server's runtime
@@ -367,13 +393,12 @@ Future work; these features are not implemented:
 - Additional job sources.
 - Configurable matching profiles.
 - Notifications and alerts.
-- A small web frontend.
 - Public deployment.
 
 ## Support
 
-Support links will be added before public launch. Buy Me a Coffee, Ko-fi, and
-PayPal links are not configured yet.
+The web interface includes Buy Me a Coffee and PayPal support links.
+Their public URLs are configured in `app/static/links.json`.
 
 ## License
 

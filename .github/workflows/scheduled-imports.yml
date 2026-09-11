@@ -1,0 +1,25 @@
+name: Scheduled job imports
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+jobs:
+  import-jobs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Import Remotive jobs
+        run: |
+          curl --fail-with-body \
+            --request POST \
+            --header "X-Import-Secret: ${{ secrets.IMPORT_SECRET }}" \
+            "https://job-radar-bonw.onrender.com/jobs/import"
+
+      - name: Import Python.org jobs
+        run: |
+          curl --fail-with-body \
+            --request POST \
+            --header "X-Import-Secret: ${{ secrets.IMPORT_SECRET }}" \
+            "https://job-radar-bonw.onrender.com/jobs/import/python-org"

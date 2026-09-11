@@ -7,6 +7,11 @@ with a deterministic match score for a junior remote Python/backend profile.
 This small backend portfolio MVP focuses on persistence, repeatable imports,
 explicit failure handling, and automated tests. Python 3.12 is the target runtime.
 
+## Live Demo
+
+- Production app: [https://job-radar-bonw.onrender.com/](https://job-radar-bonw.onrender.com/)
+- API documentation: [https://job-radar-bonw.onrender.com/docs](https://job-radar-bonw.onrender.com/docs)
+
 ## Key features
 
 - FastAPI REST API with Pydantic schemas and interactive Swagger documentation.
@@ -245,7 +250,7 @@ To activate GitHub or support links, edit the public `app/static/links.json` key
 `github`, `buy_me_a_coffee`, and `paypal`. Leave unconfigured values empty;
 the page shows non-clickable placeholders. This file is publicly served: put only
 public destination URLs here, never secrets. Rebuild the Docker image after asset
-changes. The frontend is implemented; public deployment remains future work.
+changes. Job Radar is publicly deployed on Render; see [Live Demo](#live-demo).
 
 ### Docker Compose
 
@@ -393,7 +398,6 @@ Future work; these features are not implemented:
 - Additional job sources.
 - Configurable matching profiles.
 - Notifications and alerts.
-- Public deployment.
 
 ## Support
 
